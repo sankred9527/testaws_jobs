@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: The name of the project
+  RespositoryName:
+    Type: String
+    Description: The name of the repository
+    Default: demo
+  Organization:
+    Type: String
+    Description: The organization name
+    Default: demo
+  AWSAccountId:
+    Type: String
+    Description: The AWS account ID
+  S3BucketName:
+    Type: String
+    Description: The S3 Bucket Name 
+  
+Resources:
+  # IAM role to allow github to assume the role
+  MyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-github-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWSAccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${Organization}/${RespositoryName}:*
+    #DeletionPolicy: Retain    
+
+  
+  # IAM policy to allow github action push image to ECR
+  MyECRPolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: !Sub ECR${ProjectName}
+      Roles: 
+        - !Ref MyIAMRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # GetAuthorizationToken must set resource to "*"
+          - Effect: Allow
+            Action: 
+              - ecr:GetAuthorizationToken
+            Resource: "*"
+          
+          - Effect: Allow
+            Action:
+              - ecs:UpdateService
+            Resource: "*"
+
+          - Effect: Allow
+            Action:
+              - lambda:UpdateFunctionCode
+            Resource: "*"             
+            
+          - Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:GetDownloadUrlForLayer
+              - ecr:GetRepositoryPolicy
+              - ecr:DescribeRepositories
+              - ecr:ListImages
+              - ecr:DescribeImages
+              - ecr:BatchGetImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+            Resource: !Sub arn:aws:ecr:ap-northeast-1:${AWSAccountId}:repository/*
+                    
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+              - s3:CreateBucket
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketPolicy
+              - s3:CreateAccessPoint
+            Resource:
+              - !Sub arn:aws:s3:::${S3BucketName}
+              - !Sub arn:aws:s3:::${S3BucketName}/*
+
+Outputs:
+  GitHubRoleARN:
+    Description: The ARN of the GitHub role
+    Value: !GetAtt MyIAMRole.Arn
+
+
+
+
+              

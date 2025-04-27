@@ -1,0 +1,362 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: The name of the project
+  ProjectEnv:
+    Type: String
+    Description: The environment of the project
+  AppName:
+    Type: String
+    Description: The name of the application
+  DefaultSecurityGroup:
+    Type: String
+    Description: The default security group
+  VpcId:
+    Type: String
+    Description: The VPC ID
+  PrivateSubnet1:
+    Type: String
+    Description: The private subnet 1
+  PrivateSubnet2:
+    Type: String
+    Description: The private subnet 2
+  PublicSubnet1:
+    Type: String
+    Description: The public subnet 1
+  PublicSubnet2:
+    Type: String
+    Description: The public subnet 2
+  ContainerPort:
+    Type: Number
+    Description: The port the container listens on
+    Default: 8000
+  ImageUrl:
+    Type: String
+    Description: The URL of the Docker image
+  CertificateArn:
+    Type: String
+    Description: The ARN of the certificate
+  S3BucketName:
+    Type: String
+    Description: The S3 Bucket Name 
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${ProjectName}-${ProjectEnv}
+  
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${ProjectName}-${ProjectEnv}-logs
+      RetentionInDays: 7
+
+  JobsDynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:      
+      TableName: TestJobs      
+      AttributeDefinitions:
+        - AttributeName: uuid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: uuid
+          KeyType: HASH      
+      BillingMode: PAY_PER_REQUEST      
+
+  JobsSQSQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:      
+      QueueName: "testjobs-sqs"
+      # retention 3 days
+      MessageRetentionPeriod: 259200      
+      ReceiveMessageWaitTimeSeconds: 20      
+      VisibilityTimeout: 30
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: SQSAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sqs:ReceiveMessage'
+                  - 'sqs:DeleteMessage'
+                  - 'sqs:GetQueueAttributes'
+                Resource: !GetAtt JobsSQSQueue.Arn      
+        - PolicyName: DynamoDBUpdateItemPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:UpdateItem'
+                Resource: !GetAtt JobsDynamoDBTable.Arn                 
+        - PolicyName: S3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketName}'
+                  - !Sub 'arn:aws:s3:::${S3BucketName}/*'                  
+
+  SQSMessageProcessorLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: testjobs-function
+      Code:
+        ZipFile: |
+          import json
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              for record in event['Records']:
+                  try:
+                      message_body = json.loads(record['body'])
+                      logger.info(f"Received message: {message_body}")                      
+                  except Exception as e:
+                      logger.error(f"Error processing message: {e}")
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Messages processed successfully')
+              }
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.11
+      Environment:
+        Variables:
+          TEST_DYNAMO_TABLE: !Ref JobsDynamoDBTable          
+      Timeout: 30
+
+  SQSLambdaEventSourceMapping:
+    Type: 'AWS::Lambda::EventSourceMapping'
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt JobsSQSQueue.Arn
+      FunctionName: !Ref SQSMessageProcessorLambda
+
+  # Task Definition
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-${ProjectEnv}-${AppName}
+      Cpu: '1024'
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSServiceRole.Arn
+      TaskRoleArn: !GetAtt ECSServiceRole.Arn
+      ContainerDefinitions:
+        - Name: !Ref AppName
+          Image: !Ref ImageUrl
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+              AppProtocol: http
+              Name: http
+          Environment:
+            - Name: PROJECT_ENV
+              Value: !Ref ProjectEnv                        
+            - Name: TEST_SQS_QUEUE_URL
+              Value: !Ref JobsSQSQueue
+            - Name : TEST_DYNAMO_TABLE
+              Value: !Ref JobsDynamoDBTable
+          HealthCheck:
+            Command: ["CMD-SHELL", "curl -f http://localhost:8000/testjobs/live/ || exit 1"]
+            # Command: ["CMD-SHELL", "echo ok || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref AppName
+    DependsOn: 
+      - LogGroup
+
+  # ALB
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ProjectName}-${ProjectEnv}-api
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+        - !Ref DefaultSecurityGroup
+
+  # ALB Target Group
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ProjectName}-${ProjectEnv}-api-tg  
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /testjobs/live/
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+
+  # ALB Listener (HTTP)
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+
+  # # ALB Listener (HTTPS)
+  # ALBListenerHTTPS:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref ALBTargetGroup
+  #     LoadBalancerArn: !Ref ALB
+  #     Port: 443
+  #     Protocol: HTTPS
+  #     Certificates:
+  #       - CertificateArn: !Ref CertificateArn
+
+  # ALB Security Group
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow ALB access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # ECS Execution Role
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-ecs-service-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSServicePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:*
+                  - ecr:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - dynamodb:*
+                  - logs:*
+                Resource: "*"
+
+  # ECS Service
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: 2
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref DefaultSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+      LoadBalancers:
+        - ContainerName: !Ref AppName
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref ALBTargetGroup
+      ServiceName: !Ref AppName
+    DependsOn: 
+      - ALBListenerHTTP
+      #- ALBListenerHTTPS
+
+# Auto Scaling Target Tracking Policy
+  ECSServiceAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ResourceId: !Sub "service/${ProjectName}-${ProjectEnv}/${AppName}"
+      RoleARN: !GetAtt ECSServiceRole.Arn
+      ScalableDimension: "ecs:service:DesiredCount"
+      ServiceNamespace: "ecs"
+    DependsOn: 
+      - ECSService
+
+  # Auto Scaling Policy
+  ECSServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "${ProjectName}-${ProjectEnv}-${AppName}-scale"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSServiceAutoScalingPolicy
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 75.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+
+
+Outputs:
+  ECSClusterName:
+    Description: The name of the ECS Cluster
+    Value: !Ref ECSCluster
+  ALBEndpoint:
+    Description: The DNS name of the load balancer
+    Value: !GetAtt ALB.DNSName

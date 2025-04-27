@@ -1,0 +1,10 @@
+
+requests==2.32
+django==5.2
+uuid
+marshmallow==3.26.1
+boto3
+djangorestframework 
+djangorestframework-simplejwt
+git+https://github.com/sankred9527/dynamorm.git#egg=dynamorm
+    
