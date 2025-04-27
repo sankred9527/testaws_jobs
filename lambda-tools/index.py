@@ -30,7 +30,7 @@ def upload_to_s3(uuid_key) :
 def update_status(uuid_key, new_status, result_url, start_handle_time, end_handle_time):
     
     primary_key = {
-        'uuid': uuid_key,        
+        'uuid_key': uuid_key,
     }
     
     update_expression = 'SET #status_alias = :new_value, result_url = :rurl, start_time = :start_time, end_time = :end_time'
@@ -74,8 +74,8 @@ def lambda_handler(event, context):
             start_handle_time = datetime.now().isoformat()
             time.sleep(random.randint(2,4))   
             end_handle_time = datetime.now().isoformat()
-            result_url = upload_to_s3(message_body["uuid"])
-            update_status(message_body["uuid"], 1, result_url,  start_handle_time, end_handle_time)
+            result_url = upload_to_s3(message_body["uuid_key"])
+            update_status(message_body["uuid_key"], 1, result_url,  start_handle_time, end_handle_time)
             
         except Exception as e:
             logger.error(f"Error processing message: {e}")    

@@ -38,30 +38,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub ${ProjectName}-${ProjectEnv}-logs
-      RetentionInDays: 7
-
-  MyECRRepository:
-    Type: 'AWS::ECR::Repository'
-    Properties:
-      RepositoryName: !Sub ${ProjectName}/${AppName}
-      ImageScanningConfiguration:
-        scanOnPush: true    
-      RepositoryPolicyText: 
-        Version: "2012-10-17"
-        Statement: 
-          - 
-            Sid: AllowPushPull
-            Effect: Allow
-            Principal:               
-              AWS: !Sub "${IAMROLE}"
-            Action: 
-              - "ecr:GetDownloadUrlForLayer"
-              - "ecr:BatchGetImage"
-              - "ecr:BatchCheckLayerAvailability"
-              - "ecr:PutImage"
-              - "ecr:InitiateLayerUpload"
-              - "ecr:UploadLayerPart"
-              - "ecr:CompleteLayerUpload"           
+      RetentionInDays: 7  
 
 
   # 创建 VPC
@@ -168,6 +145,16 @@ Resources:
       SubnetId: !Ref PublicSubnet2
       RouteTableId: !Ref PublicRouteTable
 
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1      
+
   # 创建私有路由表
   PrivateRouteTable1:
     Type: 'AWS::EC2::RouteTable'
@@ -186,6 +173,20 @@ Resources:
         - Key: Name
           Value: PrivateRouteTable2
 
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
   # 将私有子网 1 关联到私有路由表 1
   PrivateSubnet1RouteTableAssociation:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
@@ -200,15 +201,17 @@ Resources:
       SubnetId: !Ref PrivateSubnet2
       RouteTableId: !Ref PrivateRouteTable2
 
+      
+
   JobsDynamoDBTable:
     Type: 'AWS::DynamoDB::Table'
     Properties:      
       TableName: TestJobs      
       AttributeDefinitions:
-        - AttributeName: uuid
+        - AttributeName: uuid_key
           AttributeType: S
       KeySchema:
-        - AttributeName: uuid
+        - AttributeName: uuid_key
           KeyType: HASH      
       BillingMode: PAY_PER_REQUEST      
 
@@ -359,7 +362,11 @@ Resources:
           FromPort: 8000
           ToPort: 8000
           SourceSecurityGroupId: !Ref ALBSecurityGroup
-
+      SecurityGroupEgress:
+        - IpProtocol: -1  
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
 
   # ALB
   ALB:

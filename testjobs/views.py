@@ -49,7 +49,7 @@ def add_job(request):
         
         if uuid_key and job_name and content :
             try:                
-                job = Jobs(uuid=uuid_key, job_name=job_name, content=content, status=0, 
+                job = Jobs(uuid_key=uuid_key, job_name=job_name, content=content, status=0, 
                         create_at=datetime.now().isoformat(), start_time=datetime(1970, 1, 1).isoformat(), end_time=datetime(1970, 1, 1).isoformat() )
                 job.save(unique=True)
                 ret = send_job_to_sqs(Jobs.Schema().dump(job))

@@ -44,7 +44,7 @@ def add_job() :
     }
 
     job_data = {
-        'uuid': str(uuid.uuid4()),
+        'uuid_key': str(uuid.uuid4()),
         'job_name': f'test job is {random.randint(0,10240)}',
         'content': f'test job content is {random.randint(0,10240)}',    
     }
@@ -70,7 +70,7 @@ def query_job(uuid_key) :
 
     try:
         q = {
-            "uuid" : uuid_key
+            "uuid_key" : uuid_key
         }
         response = requests.get(base_url + 'job/query/', params=q, headers=headers)
         if response.status_code == 200:
@@ -91,7 +91,7 @@ def query_dynamodb_items(primary_keys):
     table_name = os.environ["TEST_DYNAMO_TABLE"]
     table = dynamodb.Table(table_name)
     
-    keys = [{'uuid': key } for key in primary_keys]   
+    keys = [{'uuid_key': key } for key in primary_keys]   
     request_items = {
         table.name: {
             'Keys': keys
@@ -108,7 +108,7 @@ def query_dynamodb_items(primary_keys):
             unprocessed_keys = response.get('UnprocessedKeys')
 
         
-        found_keys = [item.get('uuid') for item in items]
+        found_keys = [item.get('uuid_key') for item in items]
         for key in primary_keys:
             if key not in found_keys:
                 print(f"can't find item uuid={key} ")

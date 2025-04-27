@@ -95,6 +95,29 @@ Resources:
               - !Sub arn:aws:s3:::${S3BucketName}
               - !Sub arn:aws:s3:::${S3BucketName}/*
 
+  MyECRRepository:
+    Type: 'AWS::ECR::Repository'
+    Properties:
+      RepositoryName: !Sub ${ProjectName}/${RespositoryName}
+      ImageScanningConfiguration:
+        scanOnPush: true    
+      RepositoryPolicyText: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:               
+              AWS: !GetAtt MyIAMRole.Arn
+            Action: 
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"                    
+
 Outputs:
   GitHubRoleARN:
     Description: The ARN of the GitHub role

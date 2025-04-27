@@ -10,14 +10,14 @@ class Jobs(DynaModel):
 		# 	'endpoint_url': settings.DB_ENDPOINT
 		# }
 		name = settings.DB_TABLE
-		hash_key = 'uuid'
+		hash_key = 'uuid_key'
 		read = 25
 		write = 5
 
 	class Schema:
 		job_name = fields.String()
 		content = fields.String()
-		uuid = fields.String()
+		uuid_key = fields.String()
 		status = fields.Int()
 		create_at = fields.DateTime()
 		start_time = fields.DateTime()
