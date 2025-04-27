@@ -48,8 +48,11 @@ cd cloudformation
 部署成功以后， 去 load balancer 里看下 当前的 load balance Dns cname 是多少 , 设置到下面的 TEST_URL
 
 设置 bash 环境变量
+
+```
 export TEST_DYNAMO_TABLE="TestJobs"
 export TEST_URL="sankred9527-dev-api-1255219210.ap-northeast-1.elb.amazonaws.com"
+```
 
 然后运行 
 ./tools/c.py --add 添加1个 job
