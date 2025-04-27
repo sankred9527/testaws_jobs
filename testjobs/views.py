@@ -43,7 +43,7 @@ def add_job(request):
     verify_jwt(request)
     if request.method == 'POST':
         
-        uuid_key = request.POST.get('uuid')
+        uuid_key = request.POST.get('uuid_key')
         job_name = request.POST.get('job_name')
         content = request.POST.get('content')        
         
