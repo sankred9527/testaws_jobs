@@ -9,25 +9,7 @@ Parameters:
     Description: The environment of the project
   AppName:
     Type: String
-    Description: The name of the application
-  DefaultSecurityGroup:
-    Type: String
-    Description: The default security group
-  VpcId:
-    Type: String
-    Description: The VPC ID
-  PrivateSubnet1:
-    Type: String
-    Description: The private subnet 1
-  PrivateSubnet2:
-    Type: String
-    Description: The private subnet 2
-  PublicSubnet1:
-    Type: String
-    Description: The public subnet 1
-  PublicSubnet2:
-    Type: String
-    Description: The public subnet 2
+    Description: The name of the application  
   ContainerPort:
     Type: Number
     Description: The port the container listens on
@@ -41,6 +23,9 @@ Parameters:
   S3BucketName:
     Type: String
     Description: The S3 Bucket Name 
+  IAMROLE:
+    Type: String
+    Description: iam role
 
 Resources:
   # ECS Cluster
@@ -54,6 +39,166 @@ Resources:
     Properties:
       LogGroupName: !Sub ${ProjectName}-${ProjectEnv}-logs
       RetentionInDays: 7
+
+  MyECRRepository:
+    Type: 'AWS::ECR::Repository'
+    Properties:
+      RepositoryName: !Sub ${ProjectName}/${AppName}
+      ImageScanningConfiguration:
+        scanOnPush: true    
+      RepositoryPolicyText: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Sid: AllowPushPull
+            Effect: Allow
+            Principal:               
+              AWS: !Sub "${IAMROLE}"
+            Action: 
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:PutImage"
+              - "ecr:InitiateLayerUpload"
+              - "ecr:UploadLayerPart"
+              - "ecr:CompleteLayerUpload"           
+
+
+  # 创建 VPC
+  MyVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+
+  # 创建公共子网 1
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet1
+
+  # 创建公共子网 2
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet2
+
+  # 创建私有子网 1
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.3.0/24'
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet1
+
+  # 创建私有子网 2
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: '10.0.4.0/24'
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: PrivateSubnet2
+
+  # 创建 Internet 网关
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyInternetGateway
+
+  # 将 Internet 网关附加到 VPC
+  AttachGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # 创建公共路由表
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+
+  # 创建默认路由到 Internet 网关
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  # 将公共子网 1 关联到公共路由表
+  PublicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  # 将公共子网 2 关联到公共路由表
+  PublicSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # 创建私有路由表
+  PrivateRouteTable1:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable1
+
+  # 创建私有路由表 2
+  PrivateRouteTable2:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PrivateRouteTable2
+
+  # 将私有子网 1 关联到私有路由表 1
+  PrivateSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  # 将私有子网 2 关联到私有路由表 2
+  PrivateSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
 
   JobsDynamoDBTable:
     Type: 'AWS::DynamoDB::Table'
@@ -204,6 +349,18 @@ Resources:
     DependsOn: 
       - LogGroup
 
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ecs security group
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:        
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+
   # ALB
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -214,8 +371,7 @@ Resources:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
       SecurityGroups:
-        - !Ref ALBSecurityGroup
-        - !Ref DefaultSecurityGroup
+        - !Ref ALBSecurityGroup        
 
   # ALB Target Group
   ALBTargetGroup:
@@ -224,7 +380,7 @@ Resources:
       Name: !Sub ${ProjectName}-${ProjectEnv}-api-tg  
       Port: !Ref ContainerPort
       Protocol: HTTP
-      VpcId: !Ref VpcId
+      VpcId: !Ref MyVPC
       TargetType: ip
       HealthCheckProtocol: HTTP
       HealthCheckPath: /testjobs/live/
@@ -262,7 +418,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow ALB access
-      VpcId: !Ref VpcId
+      VpcId: !Ref MyVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 80
@@ -271,7 +427,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0
+          CidrIp: 0.0.0.0/0      
 
   # ECS Execution Role
   ECSServiceRole:
@@ -312,7 +468,7 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           SecurityGroups:
-            - !Ref DefaultSecurityGroup
+            - !Ref EcsSecurityGroup
           Subnets:
             - !Ref PrivateSubnet1
             - !Ref PrivateSubnet2

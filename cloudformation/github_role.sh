@@ -17,5 +17,4 @@ aws cloudformation deploy \
         AWSAccountId="$AWS_ACCOUNT_ID" \
         Organization="$ORGANIZATION" \
         ProjectName="$PROJECT_NAME" \
-        S3BucketName="$S3BucketName" \
-    --profile $PROFILE
+        S3BucketName="$S3BucketName" 
