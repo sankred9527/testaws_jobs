@@ -70,7 +70,7 @@ def query_job(request):
         
         if uuid_key :
             try:                                    
-                query_result = Jobs.query(uuid__eq = uuid_key)
+                query_result = Jobs.query(uuid_key = uuid_key)
                 
                 job = None
                 for _job in query_result:
