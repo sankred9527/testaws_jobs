@@ -66,7 +66,7 @@ def query_job(request):
     verify_jwt(request)
     if request.method == 'GET':
         
-        uuid_key = request.GET.get('uuid')
+        uuid_key = request.GET.get('uuid_key')
         
         if uuid_key :
             try:                                    
